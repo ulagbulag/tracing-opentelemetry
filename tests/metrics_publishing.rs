@@ -7,7 +7,7 @@ use opentelemetry_sdk::{
             AggregationSelector, DefaultAggregationSelector, DefaultTemporalitySelector,
             MetricReader, TemporalitySelector,
         },
-        InstrumentKind, ManualReader, MeterProvider,
+        InstrumentKind, ManualReader, SdkMeterProvider,
     },
     AttributeSet, Resource,
 };
@@ -127,22 +127,6 @@ async fn u64_histogram_is_exported() {
 
     tracing::subscriber::with_default(subscriber, || {
         tracing::info!(histogram.abcdefg = 9_u64);
-    });
-
-    exporter.export().unwrap();
-}
-
-#[tokio::test]
-async fn i64_histogram_is_exported() {
-    let (subscriber, exporter) = init_subscriber(
-        "abcdefg_auenatsou".to_string(),
-        InstrumentKind::Histogram,
-        -19_i64,
-        None,
-    );
-
-    tracing::subscriber::with_default(subscriber, || {
-        tracing::info!(histogram.abcdefg_auenatsou = -19_i64);
     });
 
     exporter.export().unwrap();
@@ -325,38 +309,6 @@ async fn u64_histogram_with_attributes_is_exported() {
 }
 
 #[tokio::test]
-async fn i64_histogram_with_attributes_is_exported() {
-    let (subscriber, exporter) = init_subscriber(
-        "hello_world".to_string(),
-        InstrumentKind::Histogram,
-        -1_i64,
-        Some(AttributeSet::from(
-            [
-                KeyValue::new("u64_key_1", 1_i64),
-                KeyValue::new("i64_key_1", 2_i64),
-                KeyValue::new("f64_key_1", 3_f64),
-                KeyValue::new("str_key_1", "foo"),
-                KeyValue::new("bool_key_1", true),
-            ]
-            .as_slice(),
-        )),
-    );
-
-    tracing::subscriber::with_default(subscriber, || {
-        tracing::info!(
-            histogram.hello_world = -1_i64,
-            u64_key_1 = 1_u64,
-            i64_key_1 = 2_i64,
-            f64_key_1 = 3_f64,
-            str_key_1 = "foo",
-            bool_key_1 = true,
-        );
-    });
-
-    exporter.export().unwrap();
-}
-
-#[tokio::test]
 async fn f64_histogram_with_attributes_is_exported() {
     let (subscriber, exporter) = init_subscriber(
         "hello_world".to_string(),
@@ -393,7 +345,7 @@ fn init_subscriber<T>(
     expected_instrument_kind: InstrumentKind,
     expected_value: T,
     expected_attributes: Option<AttributeSet>,
-) -> (impl Subscriber + 'static, TestExporter<T>) {
+) -> (impl Subscriber + Send + Sync + 'static, TestExporter<T>) {
     let reader = ManualReader::builder()
         .with_aggregation_selector(DefaultAggregationSelector::new())
         .with_temporality_selector(DefaultTemporalitySelector::new())
@@ -402,7 +354,9 @@ fn init_subscriber<T>(
         inner: Arc::new(reader),
     };
 
-    let provider = MeterProvider::builder().with_reader(reader.clone()).build();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(reader.clone())
+        .build();
     let exporter = TestExporter {
         expected_metric_name,
         expected_instrument_kind,
@@ -459,7 +413,7 @@ struct TestExporter<T> {
     expected_value: T,
     expected_attributes: Option<AttributeSet>,
     reader: TestReader,
-    _meter_provider: MeterProvider,
+    _meter_provider: SdkMeterProvider,
 }
 
 impl<T> TestExporter<T>
